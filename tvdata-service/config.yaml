@@ -1,0 +1,21 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  path: "./data/tvmonitor.db"
+
+monitor:
+  check_interval_secs: 60
+  max_concurrent_checks: 10
+  cooldown_secs: 300
+  max_monitors: 500
+
+alert:
+  rate_limit_per_hour: 10
+  webhook:
+    url: "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id"
+    msg_type: "interactive"
+
+search:
+  language: "cn"
