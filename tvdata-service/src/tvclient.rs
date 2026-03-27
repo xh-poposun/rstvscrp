@@ -30,7 +30,7 @@ impl TvClient {
             "Initializing TvClient - using default reqwest client which respects HTTP_PROXY/HTTPS_PROXY environment variables"
         );
 
-        let config = TradingViewClientConfig::default();
+        let config = TradingViewClientConfig::backend_history();
 
         let client = TradingViewClient::from_config(config)
             .map_err(|e| format!("failed to create client: {}", e))?;
@@ -44,6 +44,18 @@ impl TvClient {
         let mut quotes = Vec::new();
 
         for symbol in symbols {
+            // Use max request like history refresh - works reliably for Chinese stocks
+            let quote = self.get_quote_with_retry(symbol, 3).await;
+            if let Some(q) = quote {
+                quotes.push(q);
+            }
+        }
+
+        Ok(quotes)
+    }
+
+    async fn get_quote_with_retry(&self, symbol: &str, max_retries: u32) -> Option<Quote> {
+        for attempt in 1..=max_retries {
             let ticker: Ticker = symbol.to_string().into();
             let request = HistoryRequest::max(ticker, Interval::Day1);
 
@@ -64,7 +76,7 @@ impl TvClient {
                             0.0
                         };
 
-                        quotes.push(Quote {
+                        return Some(Quote {
                             symbol: symbol.to_string(),
                             price,
                             change,
@@ -78,12 +90,20 @@ impl TvClient {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("failed to get quote for {}: {}", symbol, e);
+                    tracing::warn!(
+                        "failed to get quote for {} (attempt {}/{}): {}",
+                        symbol,
+                        attempt,
+                        max_retries,
+                        e
+                    );
+                    if attempt < max_retries {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
                 }
             }
         }
-
-        Ok(quotes)
+        None
     }
 
     pub async fn get_history(&self, symbol: &str, interval: &str) -> Result<Vec<Bar>, String> {

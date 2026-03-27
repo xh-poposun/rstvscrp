@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and the project follows Semantic Version
 
 ## [Unreleased]
 
+### Added
+
+- `wss-debug` feature flag for WSS raw frame logging (opt-in, disabled by default)
+- `debug_log` module in transport layer for recording all sent/received WebSocket frames to file
+- Auth token redaction in debug logs (`set_auth_token` payloads show `[REDACTED]`)
+- Heartbeat frame condensing in debug logs (`~h~` frames logged as `[HEARTBEAT]`)
+- `symbol_error` message handling in quote session (returns `Error::SymbolNotFound` instead of timeout)
+- Step-by-step tracing in quote session protocol sequence
+- WSS comparison example (`wss_compare.rs`) for testing EN/CN symbol behavior
+
+### Fixed
+
+- Quote session now sends `set_locale(["zh-Hans", "CN"])` after `quote_create_session`, fixing timeout for Chinese exchange symbols (SSE:*, HKEX:*)
+- Quote session now handles `symbol_error` messages gracefully instead of hanging until timeout
+
 ## [0.1.2] - 2026-03-23
 
 ### Changed

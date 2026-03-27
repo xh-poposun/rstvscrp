@@ -52,7 +52,6 @@ impl Default for SearchConfig {
     }
 }
 
-
 impl Default for MonitorConfig {
     fn default() -> Self {
         Self {
@@ -149,6 +148,8 @@ alert:
   webhook:
     url: "https://example.com/hook"
     msg_type: "text"
+search:
+  language: "en"
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.server.port, 9000);
