@@ -6,7 +6,7 @@ rust-version = "1.85"
 description = "TradingView data monitoring and alerting service"
 
 [dependencies]
-tvdata-rs = { path = "../tvdata-rs", features = ["default", "calendar", "search"] }
+tvdata-rs = { path = "../tvdata-rs", features = ["default", "calendar", "search", "tracing"] }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
 serde = { version = "1", features = ["derive"] }

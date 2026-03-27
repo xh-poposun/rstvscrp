@@ -227,6 +227,7 @@ mod tests {
             database: crate::config::DatabaseConfig::default(),
             monitor: crate::config::MonitorConfig::default(),
             alert: crate::config::AlertConfig::default(),
+            search: crate::config::SearchConfig::default(),
         });
         futures::executor::block_on(async {
             sqlx::query("DELETE FROM monitors").execute(pool).await.ok();

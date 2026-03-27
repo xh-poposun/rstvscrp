@@ -91,6 +91,13 @@ pub(crate) async fn send_message(
     params: Value,
 ) -> Result<()> {
     let payload = serde_json::to_string(&json!({ "m": method, "p": params }))?;
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::transport",
+        method,
+        params = %params,
+        "sending message"
+    );
     send_raw_frame(socket, payload).await
 }
 
@@ -98,36 +105,66 @@ pub(crate) async fn send_raw_frame(
     socket: &mut TradingViewWebSocket,
     payload: String,
 ) -> Result<()> {
+    #[cfg(feature = "wss-debug")]
+    if crate::transport::debug_log::is_enabled() {
+        crate::transport::debug_log::log_send("", "", &payload);
+    }
     let framed = format!("~m~{}~m~{payload}", payload.len());
     socket.send(Message::Text(framed.into())).await?;
     Ok(())
 }
 
 pub(crate) fn parse_framed_messages(frame: &str) -> Result<Vec<&str>> {
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::transport",
+        frame_len = frame.len(),
+        "parsing framed message"
+    );
     let mut rest = frame;
     let mut payloads = Vec::new();
 
     while !rest.is_empty() {
         if let Some(next) = rest.strip_prefix("~m~") {
             let Some((len, tail)) = next.split_once("~m~") else {
-                eprintln!("[WSS PARSE] missing frame length");
+                #[cfg(feature = "tracing")]
+                warn!(
+                    target: "tvdata_rs::transport",
+                    "missing frame length"
+                );
                 rest = "";
                 continue;
             };
             let len: usize = match len.parse() {
                 Ok(l) => l,
                 Err(_) => {
-                    eprintln!("[WSS PARSE] invalid length");
+                    #[cfg(feature = "tracing")]
+                    warn!(
+                        target: "tvdata_rs::transport",
+                        "invalid frame length"
+                    );
                     rest = "";
                     continue;
                 }
             };
             if tail.len() < len {
-                eprintln!("[WSS PARSE] length > payload");
+                #[cfg(feature = "tracing")]
+                warn!(
+                    target: "tvdata_rs::transport",
+                    expected = len,
+                    actual = tail.len(),
+                    "frame length > payload"
+                );
                 rest = "";
                 continue;
             }
             let (payload, remainder) = tail.split_at(len);
+            #[cfg(feature = "tracing")]
+            debug!(
+                target: "tvdata_rs::transport",
+                payload_len = payload.len(),
+                "parsed frame payload"
+            );
             payloads.push(payload);
             rest = remainder;
             continue;
@@ -138,7 +175,6 @@ pub(crate) fn parse_framed_messages(frame: &str) -> Result<Vec<&str>> {
             continue;
         }
 
-        
         rest = "";
     }
 
@@ -225,5 +261,231 @@ mod tests {
             .unwrap();
 
         assert_eq!(cookie.lock().unwrap().as_deref(), Some("sessionid=abc123"));
+    }
+
+    #[tokio::test]
+    async fn send_raw_frame_sends_correct_framed_message() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let received_frame = Arc::new(Mutex::new(None::<String>));
+        let received_frame_clone = Arc::clone(&received_frame);
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_upgrade_request(&mut stream).await;
+
+            let key = header_value(&request, "sec-websocket-key")
+                .expect("websocket upgrade request must contain Sec-WebSocket-Key");
+            let response = format!(
+                "HTTP/1.1 101 Switching Protocols\r\n\
+                 Connection: Upgrade\r\n\
+                 Upgrade: websocket\r\n\
+                 Sec-WebSocket-Accept: {}\r\n\
+                 \r\n",
+                derive_accept_key(key.as_bytes())
+            );
+
+            stream.write_all(response.as_bytes()).await.unwrap();
+
+            let mut buffer = vec![0u8; 4096];
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n >= 6 {
+                let payload_len = (buffer[1] & 0x7F) as usize;
+                let (mask_key, payload_start) = match payload_len {
+                    126 => {
+                        if n >= 8 {
+                            ([buffer[4], buffer[5], buffer[6], buffer[7]], 8)
+                        } else {
+                            return;
+                        }
+                    }
+                    127 => {
+                        if n >= 14 {
+                            ([buffer[10], buffer[11], buffer[12], buffer[13]], 14)
+                        } else {
+                            return;
+                        }
+                    }
+                    _ => ([buffer[2], buffer[3], buffer[4], buffer[5]], 6),
+                };
+
+                let actual_len = if payload_len == 126 {
+                    u16::from_be_bytes([buffer[2], buffer[3]]) as usize
+                } else if payload_len == 127 {
+                    u64::from_be_bytes([
+                        buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
+                        buffer[8], buffer[9],
+                    ]) as usize
+                } else {
+                    payload_len
+                };
+
+                if n >= payload_start + actual_len {
+                    let mut payload = buffer[payload_start..payload_start + actual_len].to_vec();
+                    for (i, byte) in payload.iter_mut().enumerate() {
+                        *byte ^= mask_key[i % 4];
+                    }
+                    if let Ok(s) = String::from_utf8(payload) {
+                        *received_frame_clone.lock().unwrap() = Some(s);
+                    }
+                }
+            }
+        });
+
+        let endpoints = Endpoints::default()
+            .with_websocket_url(format!("ws://{address}"))
+            .unwrap();
+
+        let mut socket = connect_socket(&endpoints, "tvdata-rs/test", None)
+            .await
+            .unwrap();
+
+        let test_payload = r#"{"m":"quote_add_symbols","p":["NASDAQ:AAPL"]}"#;
+        send_raw_frame(&mut socket, test_payload.to_string())
+            .await
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let received = received_frame.lock().unwrap();
+        assert!(received.is_some(), "server should have received a frame");
+        let frame = received.as_ref().unwrap();
+        let expected = format!("~m~{}~m~{}", test_payload.len(), test_payload);
+        assert_eq!(frame, &expected);
+    }
+
+    #[test]
+    fn parse_framed_messages_with_single_frame() {
+        let frame = "~m~19~m~{\"m\":\"test\",\"p\":[]}";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert_eq!(parsed, vec![r#"{"m":"test","p":[]}"#]);
+    }
+
+    #[test]
+    fn parse_framed_messages_with_multiple_frames() {
+        let frame = "~m~9~m~{\"m\":\"a\"}~m~9~m~{\"m\":\"b\"}~m~9~m~{\"m\":\"c\"}";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert_eq!(parsed, vec![r#"{"m":"a"}"#, r#"{"m":"b"}"#, r#"{"m":"c"}"#]);
+    }
+
+    #[test]
+    fn parse_framed_messages_with_empty_payload() {
+        let frame = "~m~0~m~";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert_eq!(parsed, vec![""]);
+    }
+
+    #[test]
+    fn parse_framed_messages_ignores_invalid_length() {
+        let frame = "~m~abc~m~{\"m\":\"test\"}";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn parse_framed_messages_handles_truncated_payload() {
+        let frame = "~m~100~m~short";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[cfg(feature = "wss-debug")]
+    #[test]
+    fn debug_logging_does_not_affect_parse_framed_messages() {
+        let frame = "~m~9~m~{\"m\":\"a\"}~m~9~m~{\"m\":\"b\"}";
+        let parsed = parse_framed_messages(frame).unwrap();
+        assert_eq!(parsed, vec![r#"{"m":"a"}"#, r#"{"m":"b"}"#]);
+    }
+
+    #[cfg(feature = "wss-debug")]
+    #[tokio::test]
+    async fn send_raw_frame_with_debug_logging_enabled() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let received_frame = Arc::new(Mutex::new(None::<String>));
+        let received_frame_clone = Arc::clone(&received_frame);
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_upgrade_request(&mut stream).await;
+
+            let key = header_value(&request, "sec-websocket-key")
+                .expect("websocket upgrade request must contain Sec-WebSocket-Key");
+            let response = format!(
+                "HTTP/1.1 101 Switching Protocols\r\n\
+                 Connection: Upgrade\r\n\
+                 Upgrade: websocket\r\n\
+                 Sec-WebSocket-Accept: {}\r\n\
+                 \r\n",
+                derive_accept_key(key.as_bytes())
+            );
+
+            stream.write_all(response.as_bytes()).await.unwrap();
+
+            let mut buffer = vec![0u8; 4096];
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n >= 6 {
+                let payload_len = (buffer[1] & 0x7F) as usize;
+                let (mask_key, payload_start) = match payload_len {
+                    126 => {
+                        if n >= 8 {
+                            ([buffer[4], buffer[5], buffer[6], buffer[7]], 8)
+                        } else {
+                            return;
+                        }
+                    }
+                    127 => {
+                        if n >= 14 {
+                            ([buffer[10], buffer[11], buffer[12], buffer[13]], 14)
+                        } else {
+                            return;
+                        }
+                    }
+                    _ => ([buffer[2], buffer[3], buffer[4], buffer[5]], 6),
+                };
+
+                let actual_len = if payload_len == 126 {
+                    u16::from_be_bytes([buffer[2], buffer[3]]) as usize
+                } else if payload_len == 127 {
+                    u64::from_be_bytes([
+                        buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
+                        buffer[8], buffer[9],
+                    ]) as usize
+                } else {
+                    payload_len
+                };
+
+                if n >= payload_start + actual_len {
+                    let mut payload = buffer[payload_start..payload_start + actual_len].to_vec();
+                    for (i, byte) in payload.iter_mut().enumerate() {
+                        *byte ^= mask_key[i % 4];
+                    }
+                    if let Ok(s) = String::from_utf8(payload) {
+                        *received_frame_clone.lock().unwrap() = Some(s);
+                    }
+                }
+            }
+        });
+
+        let endpoints = Endpoints::default()
+            .with_websocket_url(format!("ws://{address}"))
+            .unwrap();
+
+        let mut socket = connect_socket(&endpoints, "tvdata-rs/test", None)
+            .await
+            .unwrap();
+
+        let test_payload = r#"{"m":"quote_add_symbols","p":["NASDAQ:AAPL"]}"#;
+        send_raw_frame(&mut socket, test_payload.to_string())
+            .await
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let received = received_frame.lock().unwrap();
+        assert!(received.is_some(), "server should have received a frame");
+        let frame = received.as_ref().unwrap();
+        let expected = format!("~m~{}~m~{}", test_payload.len(), test_payload);
+        assert_eq!(frame, &expected);
     }
 }

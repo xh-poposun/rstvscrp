@@ -21,6 +21,7 @@ crypto = []
 calendar = []
 economics = []
 tracing = ["dep:tracing"]
+wss-debug = ["dep:tracing"]
 
 [dependencies]
 bon = "3.9.1"

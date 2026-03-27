@@ -59,11 +59,15 @@ src/
 ├── error.rs          # Error types (thiserror)
 ├── models.rs         # Domain models (Monitor, Alert, Rule)
 ├── tvclient.rs       # tvdata-rs client wrapper
+├── history_refresh.rs # Background history refresh task
 ├── api/              # REST API handlers
 │   ├── monitors.rs   # Monitor CRUD
 │   ├── rules.rs     # Alert rule CRUD
 │   ├── alerts.rs   # Alert list + acknowledge
-│   └── quotes.rs   # Real-time quotes
+│   ├── quotes.rs   # Real-time quotes
+│   ├── search.rs   # Symbol search
+│   ├── history.rs  # Historical data query
+│   └── shutdown.rs # Graceful shutdown
 ├── monitor/          # Monitoring engine
 │   ├── price.rs
 │   ├── indicator.rs
@@ -117,6 +121,9 @@ alert:
   webhook:
     url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
     msg_type: "interactive"
+
+search:
+  language: "cn"  # Search language: cn (Chinese), en (English)
 ```
 
 ## API Endpoints
@@ -136,6 +143,9 @@ alert:
 | `/api/v1/alerts` | GET | List alerts (paginated) |
 | `/api/v1/alerts/:id/ack` | POST | Acknowledge alert |
 | `/api/v1/quotes/:symbol` | GET | Get quote |
+| `/api/v1/search` | GET | Search symbols |
+| `/api/v1/history/:symbol` | GET | Get historical data |
+| `/shutdown` | POST | Graceful shutdown |
 
 ## CI Validation
 

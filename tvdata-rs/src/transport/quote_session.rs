@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
+#[cfg(feature = "tracing")]
+use tracing::{debug, warn};
 
 use crate::client::TradingViewClient;
 use crate::error::{Error, Result};
@@ -83,6 +85,11 @@ impl<'a> QuoteSessionClient<'a> {
         let mut socket = self.client.connect_socket().await?;
         let quote_session = next_session_id("qs");
         let requested_symbol = symbol.as_str().to_owned();
+
+        #[cfg(feature = "wss-debug")]
+        if let Ok(path) = std::env::var("WSS_DEBUG_LOG") {
+            let _ = crate::transport::debug_log::init(&path);
+        }
         let set_fields_args = quote_set_fields_payload(quote_session.as_str(), fields);
 
         send_message(
@@ -91,19 +98,34 @@ impl<'a> QuoteSessionClient<'a> {
             json!([self.client.auth_token()]),
         )
         .await?;
+        #[cfg(feature = "tracing")]
+        debug!(session = %quote_session, "sent set_auth_token");
+
         send_message(
             &mut socket,
             "quote_create_session",
             json!([quote_session.as_str()]),
         )
         .await?;
+        #[cfg(feature = "tracing")]
+        debug!(session = %quote_session, "sent quote_create_session");
+
+        send_message(&mut socket, "set_locale", json!(["zh-Hans", "CN"])).await?;
+        #[cfg(feature = "tracing")]
+        debug!(session = %quote_session, locale = "zh-Hans/CN", "sent set_locale");
+
         send_message(&mut socket, "quote_set_fields", set_fields_args).await?;
+        #[cfg(feature = "tracing")]
+        debug!(session = %quote_session, "sent quote_set_fields");
+
         send_message(
             &mut socket,
             "quote_add_symbols",
             json!([quote_session.as_str(), requested_symbol.as_str()]),
         )
         .await?;
+        #[cfg(feature = "tracing")]
+        debug!(session = %quote_session, symbol = %requested_symbol, "sent quote_add_symbols");
 
         let mut state = QuoteSymbolState::default();
 
@@ -112,6 +134,8 @@ impl<'a> QuoteSessionClient<'a> {
                 let message = message?;
                 match message {
                     Message::Text(text) => {
+                        #[cfg(feature = "wss-debug")]
+                        crate::transport::debug_log::log_recv(&quote_session, &requested_symbol, &text);
                         for payload in parse_framed_messages(&text)? {
                             if let Some(heartbeat) = payload.strip_prefix("~h~") {
                                 send_raw_frame(&mut socket, format!("~h~{heartbeat}")).await?;
@@ -125,6 +149,8 @@ impl<'a> QuoteSessionClient<'a> {
 
                             match envelope.get("m").and_then(Value::as_str).unwrap_or_default() {
                                 "qsd" => {
+                                    #[cfg(feature = "tracing")]
+                                    debug!(session = %quote_session, symbol = %requested_symbol, "received qsd message");
                                     merge_quote_symbol_state(
                                         &requested_symbol,
                                         &mut state,
@@ -132,6 +158,8 @@ impl<'a> QuoteSessionClient<'a> {
                                     )?;
                                 }
                                 "quote_completed" => {
+                                    #[cfg(feature = "tracing")]
+                                    debug!(session = %quote_session, symbol = %requested_symbol, "received quote_completed");
                                     if completed_symbol(&envelope) == Some(requested_symbol.as_str())
                                     {
                                         if matches!(state.status.as_deref(), Some(status) if status != "ok")
@@ -150,6 +178,13 @@ impl<'a> QuoteSessionClient<'a> {
 
                                         return Ok(QuoteFieldValues::from_values(state.values));
                                     }
+                                }
+                                "symbol_error" => {
+                                    #[cfg(feature = "tracing")]
+                                    warn!(session = %quote_session, symbol = %requested_symbol, "received symbol_error");
+                                    return Err(Error::SymbolNotFound {
+                                        symbol: requested_symbol.clone(),
+                                    });
                                 }
                                 _ => {}
                             }
@@ -372,7 +407,7 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             let mut socket = accept_async(stream).await.unwrap();
 
-            for _ in 0..4 {
+            for _ in 0..5 {
                 match socket.next().await {
                     Some(Ok(Message::Text(_))) => {}
                     other => panic!("unexpected websocket client message: {other:?}"),
@@ -413,6 +448,115 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, Error::QuoteEmpty { symbol } if symbol == "NASDAQ:AAPL"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_fields_sends_set_locale_in_protocol_sequence() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+
+            let mut messages = Vec::new();
+            for _ in 0..5 {
+                match socket.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        messages.push(text.to_string());
+                    }
+                    other => panic!("unexpected websocket client message: {other:?}"),
+                }
+            }
+
+            let has_set_locale = messages.iter().any(|msg| msg.contains("set_locale"));
+            assert!(
+                has_set_locale,
+                "set_locale message not found in protocol sequence"
+            );
+
+            let set_locale_pos = messages
+                .iter()
+                .position(|msg| msg.contains("set_locale"))
+                .unwrap();
+            let create_session_pos = messages
+                .iter()
+                .position(|msg| msg.contains("quote_create_session"))
+                .unwrap();
+            let set_fields_pos = messages
+                .iter()
+                .position(|msg| msg.contains("quote_set_fields"))
+                .unwrap();
+
+            assert!(
+                set_locale_pos > create_session_pos,
+                "set_locale should come after quote_create_session"
+            );
+            assert!(
+                set_locale_pos < set_fields_pos,
+                "set_locale should come before quote_set_fields"
+            );
+
+            socket.close(None).await.unwrap();
+        });
+
+        let client = TradingViewClient::builder()
+            .endpoints(
+                Endpoints::default()
+                    .with_websocket_url(format!("ws://{address}"))
+                    .unwrap(),
+            )
+            .build()
+            .unwrap();
+
+        let result = QuoteSessionClient::new(&client)
+            .fetch_fields(&Ticker::new("NASDAQ:AAPL"), &[Column::from_static("close")])
+            .await;
+
+        assert!(result.is_err());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_fields_returns_symbol_not_found_on_symbol_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+
+            for _ in 0..5 {
+                match socket.next().await {
+                    Some(Ok(Message::Text(_))) => {}
+                    other => panic!("unexpected websocket client message: {other:?}"),
+                }
+            }
+
+            let payload = serde_json::to_string(&json!({
+                "m": "symbol_error",
+                "p": ["qs_1", "SSE:600941"]
+            }))
+            .unwrap();
+            let frame = format!("~m~{}~m~{payload}", payload.len());
+            socket.send(Message::Text(frame.into())).await.unwrap();
+            socket.close(None).await.unwrap();
+        });
+
+        let client = TradingViewClient::builder()
+            .endpoints(
+                Endpoints::default()
+                    .with_websocket_url(format!("ws://{address}"))
+                    .unwrap(),
+            )
+            .build()
+            .unwrap();
+
+        let error = QuoteSessionClient::new(&client)
+            .fetch_fields(&Ticker::new("SSE:600941"), &[Column::from_static("close")])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, Error::SymbolNotFound { symbol } if symbol == "SSE:600941"));
         server.await.unwrap();
     }
 

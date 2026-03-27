@@ -11,6 +11,7 @@ A TradingView data monitoring and alerting service built in Rust. Monitor stock 
 - **REST API**: Full CRUD operations for monitors, rules, and alerts
 - **SQLite Storage**: Zero-dependency local database
 - **Proxy Support**: Automatic HTTP_PROXY/HTTPS_PROXY support
+- **Chinese Stock Support**: Support for SSE (Shanghai), HKEX (Hong Kong) exchanges
 
 ## Requirements
 

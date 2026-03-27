@@ -63,12 +63,7 @@ pub(crate) async fn fetch_history_with_timeout(
         json!([chart_session.as_str(), ""]),
     )
     .await?;
-    send_message(
-        &mut socket,
-        "set_locale",
-        json!(["zh-Hans", "CN"]),
-    )
-    .await?;
+    send_message(&mut socket, "set_locale", json!(["zh-Hans", "CN"])).await?;
     send_message(
         &mut socket,
         "switch_timezone",
@@ -237,25 +232,61 @@ pub(crate) async fn fetch_history_with_timeout_for_client(
     let requested_chunk_bars = request.bars.max(1);
 
     let chart_session = next_session_id("cs");
+
+    #[cfg(feature = "wss-debug")]
+    if let Ok(path) = std::env::var("WSS_DEBUG_LOG") {
+        let _ = crate::transport::debug_log::init(&path);
+    }
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        "sending set_auth_token"
+    );
     send_message(&mut socket, "set_auth_token", json!([client.auth_token()])).await?;
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        chart_session = %chart_session,
+        "sending chart_create_session"
+    );
     send_message(
         &mut socket,
         "chart_create_session",
         json!([chart_session.as_str(), ""]),
     )
     .await?;
-    send_message(
-        &mut socket,
-        "set_locale",
-        json!(["zh-Hans", "CN"]),
-    )
-    .await?;
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        "sending set_locale zh-Hans/CN"
+    );
+    send_message(&mut socket, "set_locale", json!(["zh-Hans", "CN"])).await?;
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        "sending switch_timezone exchange"
+    );
     send_message(
         &mut socket,
         "switch_timezone",
         json!([chart_session.as_str(), "exchange"]),
     )
     .await?;
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        "sending resolve_symbol"
+    );
     send_message(
         &mut socket,
         "resolve_symbol",
@@ -271,6 +302,14 @@ pub(crate) async fn fetch_history_with_timeout_for_client(
         ]),
     )
     .await?;
+
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        bars = requested_chunk_bars,
+        "sending create_series"
+    );
     send_message(
         &mut socket,
         "create_series",
@@ -285,6 +324,13 @@ pub(crate) async fn fetch_history_with_timeout_for_client(
     )
     .await?;
 
+    #[cfg(feature = "tracing")]
+    debug!(
+        target: "tvdata_rs::history",
+        symbol = %request.symbol.as_str(),
+        "all messages sent, waiting for response"
+    );
+
     let result = timeout(history_timeout, async {
         let mut bars = BTreeMap::new();
         let mut pagination = request
@@ -294,6 +340,8 @@ pub(crate) async fn fetch_history_with_timeout_for_client(
             let message = message?;
             match message {
                 Message::Text(text) => {
+                    #[cfg(feature = "wss-debug")]
+                    crate::transport::debug_log::log_recv(&chart_session, request.symbol.as_str(), &text);
                     for payload in parse_framed_messages(&text)? {
                         if let Some(heartbeat) = payload.strip_prefix("~h~") {
                             send_raw_frame(&mut socket, format!("~h~{heartbeat}")).await?;
@@ -374,7 +422,7 @@ pub(crate) async fn fetch_history_with_timeout_for_client(
                     );
                     break;
                 }
-                _ => {}
+                other => { #[cfg(feature = "tracing")] warn!(target: "tvdata_rs::history", symbol = %request.symbol.as_str(), message_type = ?other, "received unexpected message type"); }
             }
         }
 
