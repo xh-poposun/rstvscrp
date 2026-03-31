@@ -26,6 +26,8 @@ use tradingview_mcp::handlers::{
     handle_calculate_macd,
     handle_compute_macd_signal,
     handle_get_debt_maturity,
+    handle_get_company_profile,
+    handle_get_market_news,
 };
 
 /// Application configuration loaded from environment variables
@@ -214,6 +216,8 @@ fn create_mcp_server() -> McpServer {
     server.register_handler("calculate_macd", handle_calculate_macd);
     server.register_handler("get_debt_maturity", handle_get_debt_maturity);
     server.register_handler("compute_macd_signal", handle_compute_macd_signal);
+    server.register_handler("get_company_profile", handle_get_company_profile);
+    server.register_handler("get_market_news", handle_get_market_news);
 
     server
 }
