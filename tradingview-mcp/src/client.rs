@@ -218,6 +218,15 @@ pub struct Fundamentals {
     pub gross_profit: Option<f64>,
     pub operating_income: Option<f64>,
     pub net_income: Option<f64>,
+    pub buyback_yield: Option<f64>,
+    pub share_buyback_ratio_fq: Option<f64>,
+    pub share_buyback_ratio_fy: Option<f64>,
+    pub total_shares_outstanding: Option<f64>,
+    pub total_shares_outstanding_current: Option<f64>,
+    pub diluted_shares_outstanding_fq: Option<f64>,
+    pub float_shares_outstanding: Option<f64>,
+    pub shares_outstanding: Option<f64>,
+    pub total_shares_outstanding_calculated: Option<f64>,
 }
 
 /// Search result structure
@@ -370,28 +379,37 @@ impl TradingViewMcpClient {
                 let _permit = rate_limiter.acquire().await;
 
                 let equity = inner.equity();
-                let snapshot = equity
-                    .fundamentals(symbol.clone())
+                let overview = equity
+                    .overview(symbol.clone())
                     .await
                     .map_err(|e| ClientError::Api(format!("Failed to fetch fundamentals: {}", e)))?;
 
                 Ok(Fundamentals {
                     symbol: symbol.clone(),
-                    market_cap: snapshot.market_cap,
-                    pe_ratio: snapshot.price_earnings_ttm,
-                    eps: snapshot.eps_ttm,
-                    dividend_yield: snapshot.dividend_yield_recent,
+                    market_cap: overview.fundamentals.market_cap,
+                    pe_ratio: overview.fundamentals.price_earnings_ttm,
+                    eps: overview.fundamentals.eps_ttm,
+                    dividend_yield: overview.fundamentals.dividend_yield_recent,
                     beta: None,
-                    price_to_book: snapshot.price_to_book_fq,
-                    debt_to_equity: snapshot.debt_to_equity_mrq,
-                    current_ratio: snapshot.current_ratio_mrq,
+                    price_to_book: overview.fundamentals.price_to_book_fq,
+                    debt_to_equity: overview.fundamentals.debt_to_equity_mrq,
+                    current_ratio: overview.fundamentals.current_ratio_mrq,
                     quick_ratio: None,
-                    roe: snapshot.return_on_equity_ttm,
-                    roa: snapshot.return_on_assets_ttm,
-                    revenue: snapshot.total_revenue_ttm,
+                    roe: overview.fundamentals.return_on_equity_ttm,
+                    roa: overview.fundamentals.return_on_assets_ttm,
+                    revenue: overview.fundamentals.total_revenue_ttm,
                     gross_profit: None,
                     operating_income: None,
-                    net_income: snapshot.net_income_ttm,
+                    net_income: overview.fundamentals.net_income_ttm,
+                    buyback_yield: overview.buyback.buyback_yield,
+                    share_buyback_ratio_fq: overview.buyback.share_buyback_ratio_fq,
+                    share_buyback_ratio_fy: overview.buyback.share_buyback_ratio_fy,
+                    total_shares_outstanding: overview.buyback.total_shares_outstanding,
+                    total_shares_outstanding_current: overview.buyback.total_shares_outstanding_current,
+                    diluted_shares_outstanding_fq: overview.buyback.diluted_shares_outstanding_fq,
+                    float_shares_outstanding: overview.buyback.float_shares_outstanding,
+                    shares_outstanding: overview.buyback.shares_outstanding,
+                    total_shares_outstanding_calculated: overview.buyback.total_shares_outstanding_calculated,
                 })
             }
         })

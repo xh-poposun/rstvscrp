@@ -1,9 +1,10 @@
-use crate::market_data::{RowDecoder, decode_quote, decode_technical};
-use crate::scanner::fields::{analyst, fundamentals, price};
+use crate::market_data::{decode_quote, decode_technical, RowDecoder};
+use crate::scanner::fields::{analyst, financials, fundamentals, price};
 
 use super::types::{
     AnalystForecasts, AnalystFxRates, AnalystPriceTargets, AnalystRecommendations, AnalystSummary,
-    EarningsCalendar, EquityOverview, FundamentalsSnapshot,
+    BuybackMetrics, CreditRatingHistoryPoint, DebtDetail, EarningsCalendar, EquityOverview,
+    FinancialStatementsDetail, FundamentalsSnapshot,
 };
 
 pub(crate) fn decode_fundamentals(
@@ -26,6 +27,28 @@ pub(crate) fn decode_fundamentals(
         current_ratio_mrq: decoder.number(row, fundamentals::CURRENT_RATIO_MRQ.as_str()),
         free_cash_flow_ttm: decoder.number(row, fundamentals::FREE_CASH_FLOW_TTM.as_str()),
         ebitda_ttm: decoder.number(row, fundamentals::EBITDA_TTM.as_str()),
+    }
+}
+
+pub(crate) fn decode_buyback(
+    decoder: &RowDecoder,
+    row: &crate::scanner::ScanRow,
+) -> BuybackMetrics {
+    BuybackMetrics {
+        buyback_yield: decoder.number(row, financials::BUYBACK_YIELD.as_str()),
+        share_buyback_ratio_fq: decoder.number(row, financials::SHARE_BUYBACK_RATIO_FQ.as_str()),
+        share_buyback_ratio_fy: decoder.number(row, financials::SHARE_BUYBACK_RATIO_FY.as_str()),
+        total_shares_outstanding: decoder
+            .number(row, financials::TOTAL_SHARES_OUTSTANDING.as_str()),
+        total_shares_outstanding_current: decoder
+            .number(row, financials::TOTAL_SHARES_OUTSTANDING_CURRENT.as_str()),
+        diluted_shares_outstanding_fq: decoder
+            .number(row, financials::DILUTED_SHARES_OUTSTANDING_FQ.as_str()),
+        float_shares_outstanding: decoder
+            .number(row, financials::FLOAT_SHARES_OUTSTANDING.as_str()),
+        shares_outstanding: decoder.number(row, financials::SHARES_OUTSTANDING.as_str()),
+        total_shares_outstanding_calculated: decoder
+            .number(row, financials::TOTAL_SHARES_OUTSTANDING_CALC.as_str()),
     }
 }
 
@@ -155,5 +178,199 @@ pub(crate) fn decode_overview(
         fundamentals: decode_fundamentals(decoder, row),
         analyst: decode_analyst(decoder, row),
         technicals: decode_technical(decoder, row),
+        buyback: decode_buyback(decoder, row),
+    }
+}
+
+pub(crate) fn decode_financial_statements_detail(
+    decoder: &RowDecoder,
+    row: &crate::scanner::ScanRow,
+) -> FinancialStatementsDetail {
+    use crate::scanner::fields::financials;
+
+    FinancialStatementsDetail {
+        revenue_fy: decoder.number(row, financials::REVENUE_FY.as_str()),
+        revenue_fq: decoder.number(row, financials::REVENUE_FQ.as_str()),
+        revenue_ttm: None,
+        revenue_fq_h: None,
+        revenue_fy_h: None,
+        gross_profit_fy: decoder.number(row, financials::GROSS_PROFIT_FY.as_str()),
+        gross_profit_fq: decoder.number(row, financials::GROSS_PROFIT_FQ.as_str()),
+        gross_profit_ttm: None,
+        gross_profit_fq_h: None,
+        gross_profit_fy_h: None,
+        operating_income_fy: decoder.number(row, financials::OPERATING_INCOME_FY.as_str()),
+        operating_income_fq: decoder.number(row, financials::OPERATING_INCOME_FQ.as_str()),
+        operating_income_ttm: None,
+        ebitda_fy: decoder.number(row, financials::EBITDA_FY.as_str()),
+        ebitda_fq: decoder.number(row, financials::EBITDA_FQ.as_str()),
+        ebitda_ttm: None,
+        ebitda_fy_h: None,
+        ebit_fy: decoder.number(row, financials::EBIT_FY.as_str()),
+        ebit_fq: decoder.number(row, financials::EBIT_FQ.as_str()),
+        ebit_fq_h: None,
+        ebit_fy_h: None,
+        net_income_fy: decoder.number(row, financials::NET_INCOME_FY.as_str()),
+        net_income_fq: decoder.number(row, financials::NET_INCOME_FQ.as_str()),
+        net_income_ttm: None,
+        net_income_fq_h: None,
+        net_income_fy_h: None,
+        eps_basic_fy: decoder.number(row, financials::EPS_BASIC_FY.as_str()),
+        eps_basic_fq: decoder.number(row, financials::EPS_BASIC_FQ.as_str()),
+        eps_basic_ttm: None,
+        eps_basic_fq_h: None,
+        eps_diluted_fq: decoder.number(row, financials::EPS_DILUTED_FQ.as_str()),
+        eps_diluted_ttm: None,
+        cost_of_goods_fy: None,
+        cost_of_goods_fy_h: None,
+        operating_expenses_fq: None,
+        operating_expenses_fy: None,
+        operating_expenses_fq_h: None,
+        operating_expenses_fy_h: None,
+        total_assets_fq: decoder.number(row, financials::TOTAL_ASSETS_FQ.as_str()),
+        total_assets_fy: decoder.number(row, financials::TOTAL_ASSETS_FY.as_str()),
+        total_assets_fq_h: None,
+        total_assets_fy_h: None,
+        current_assets_fq: decoder.number(row, financials::TOTAL_CURRENT_ASSETS_FQ.as_str()),
+        cash_fq: decoder.number(row, financials::CASH_AND_EQUIVALENTS_FQ.as_str()),
+        cash_fy: decoder.number(row, financials::CASH_AND_EQUIVALENTS_FY.as_str()),
+        receivables_fq: decoder.number(row, financials::ACCOUNTS_RECEIVABLE_FQ.as_str()),
+        receivables_fy_h: None,
+        inventory_fq: decoder.number(row, financials::INVENTORY_FQ.as_str()),
+        inventory_fq_h: None,
+        ppe_net_fy: decoder.number(row, financials::PROPERTY_PLANT_EQUIPMENT_FY.as_str()),
+        ppe_net_fy_h: None,
+        goodwill_fy: decoder.number(row, financials::GOODWILL_FY.as_str()),
+        goodwill_fy_h: None,
+        intangibles_net_fq: decoder.number(row, financials::INTANGIBLE_ASSETS_FQ.as_str()),
+        intangibles_net_fy: decoder.number(row, financials::INTANGIBLE_ASSETS_FY.as_str()),
+        intangibles_net_fq_h: None,
+        total_liabilities_fq: decoder.number(row, financials::TOTAL_LIABILITIES_FQ.as_str()),
+        total_liabilities_fy: decoder.number(row, financials::TOTAL_LIABILITIES_FY.as_str()),
+        total_liabilities_fq_h: None,
+        total_liabilities_fy_h: None,
+        current_liabilities_fq: decoder
+            .number(row, financials::TOTAL_CURRENT_LIABILITIES_FQ.as_str()),
+        accounts_payable_fy: decoder.number(row, financials::ACCOUNTS_PAYABLE_FY.as_str()),
+        long_term_debt_fq: decoder.number(row, financials::LONG_TERM_DEBT_FQ.as_str()),
+        long_term_debt_fy_h: None,
+        short_term_debt_fq: decoder.number(row, financials::SHORT_TERM_DEBT_FQ.as_str()),
+        short_term_debt_fq_h: None,
+        total_equity_fq: decoder.number(row, financials::TOTAL_EQUITY_FQ.as_str()),
+        total_equity_fy_h: None,
+        common_equity_total_fy: None,
+        common_equity_total_fq_h: None,
+        operating_cash_flow_fy: decoder.number(row, financials::CASH_FROM_OPERATIONS_FY.as_str()),
+        operating_cash_flow_ttm: None,
+        operating_cash_flow_fy_h: None,
+        free_cash_flow_fy: decoder.number(row, financials::FREE_CASH_FLOW_FY.as_str()),
+        free_cash_flow_ttm: None,
+        free_cash_flow_fy_h: None,
+        capex_fq: decoder.number(row, financials::CAPITAL_EXPENDITURES_FQ.as_str()),
+        capex_fy: decoder.number(row, financials::CAPITAL_EXPENDITURES_FY.as_str()),
+        capex_fq_h: None,
+        capex_fy_h: None,
+        investing_cash_flow_fy: decoder.number(row, financials::CASH_FROM_INVESTING_FY.as_str()),
+        financing_cash_flow_fy: decoder.number(row, financials::CASH_FROM_FINANCING_FY.as_str()),
+        financing_cash_flow_fq: decoder.number(row, financials::CASH_FROM_FINANCING_FQ.as_str()),
+    }
+}
+
+pub(crate) fn decode_debt_detail(
+    decoder: &RowDecoder,
+    row: &crate::scanner::ScanRow,
+) -> DebtDetail {
+    use crate::scanner::fields::financials;
+
+    DebtDetail {
+        total_debt: decoder.number(row, financials::TOTAL_DEBT_FQ.as_str()),
+        long_term_debt: decoder.number(row, financials::LONG_TERM_DEBT_FQ.as_str()),
+        long_term_debt_excl_capital_lease: None,
+        short_term_debt: decoder.number(row, financials::SHORT_TERM_DEBT_FQ.as_str()),
+        net_debt: decoder.number(row, financials::NET_DEBT_FQ.as_str()),
+        net_debt_fq_h: None,
+        net_debt_fy_h: None,
+        debt_to_equity: decoder.number(row, financials::DEBT_TO_EQUITY_FQ.as_str()),
+        debt_to_equity_fq_h: None,
+        debt_to_assets: decoder.number(row, financials::DEBT_TO_ASSETS_FQ.as_str()),
+        long_term_debt_to_assets: None,
+        long_term_debt_to_assets_fq_h: None,
+        long_term_debt_to_assets_fy_h: None,
+        net_debt_to_ebitda: decoder.number(row, financials::DEBT_TO_EBITDA_FQ.as_str()),
+        interest_expense_fq: None,
+        interest_expense_fy: None,
+        interest_coverage: decoder.number(row, financials::INTEREST_COVERAGE_FQ.as_str()),
+        ebitda_interest_cover_fy: None,
+    }
+}
+
+fn map_credit_rating(code: i32) -> String {
+    match code {
+        100..=199 => format!("AAA{}", map_rating_suffix(code % 100)),
+        200..=299 => format!("AA{}", map_rating_suffix(code % 100)),
+        300..=399 => format!("A{}", map_rating_suffix(code % 100)),
+        400..=499 => format!("BBB{}", map_rating_suffix(code % 100)),
+        500..=599 => format!("BB{}", map_rating_suffix(code % 100)),
+        600..=699 => format!("B{}", map_rating_suffix(code % 100)),
+        700..=799 => format!("CCC{}", map_rating_suffix(code % 100)),
+        800..=899 => format!("CC{}", map_rating_suffix(code % 100)),
+        900..=999 => format!("C{}", map_rating_suffix(code % 100)),
+        1000..=1099 => format!("D{}", map_rating_suffix(code % 100)),
+        _ => "Unknown".to_string(),
+    }
+}
+
+fn map_rating_suffix(suffix: i32) -> &'static str {
+    match suffix {
+        0 => "",
+        10 => "+",
+        20 => "-",
+        _ => "",
+    }
+}
+
+pub(crate) fn decode_credit_rating_snapshot(
+    decoder: &RowDecoder,
+    row: &crate::scanner::ScanRow,
+) -> super::types::CreditRatingSnapshot {
+    use crate::scanner::fields::financials;
+
+    super::types::CreditRatingSnapshot {
+        fitch_rating_lt: decoder
+            .number(row, financials::ISSUER_FITCH_RATING_LT.as_str())
+            .map(|v| v as i32),
+        fitch_rating_st: decoder
+            .number(row, financials::ISSUER_FITCH_RATING_ST.as_str())
+            .map(|v| v as i32),
+        fitch_outlook_lt: decoder
+            .number(row, financials::ISSUER_FITCH_OUTLOOK_LT.as_str())
+            .map(|v| v as i32),
+        fitch_rating_st_h: None,
+        snp_rating_lt: decoder
+            .number(row, financials::ISSUER_SNP_RATING_LT.as_str())
+            .map(|v| v as i32),
+    }
+}
+
+pub(crate) fn decode_valuation_metrics(
+    decoder: &RowDecoder,
+    row: &crate::scanner::ScanRow,
+) -> super::types::ValuationMetrics {
+    use crate::scanner::fields::financials;
+
+    super::types::ValuationMetrics {
+        price_earnings: None,
+        price_book: None,
+        price_book_fq_h: None,
+        price_book_fy_h: None,
+        price_sales: None,
+        price_sales_fq_h: None,
+        price_cash_flow: decoder.number(row, financials::PRICE_TO_CASH_FLOW_FQ.as_str()),
+        enterprise_value: decoder.number(row, financials::ENTERPRISE_VALUE_FQ.as_str()),
+        enterprise_value_fy_h: None,
+        ev_ebitda: decoder.number(row, financials::EV_TO_EBITDA_FQ.as_str()),
+        ev_ebitda_fy: decoder.number(row, financials::EV_TO_EBITDA_FY.as_str()),
+        beta_3_year: None,
+        beta_5_year: None,
     }
 }

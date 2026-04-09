@@ -29,6 +29,15 @@ pub async fn handle_get_fundamentals(
         gross_profit: fundamentals.gross_profit,
         operating_income: fundamentals.operating_income,
         net_income: fundamentals.net_income,
+        buyback_yield: fundamentals.buyback_yield,
+        share_buyback_ratio_fq: fundamentals.share_buyback_ratio_fq,
+        share_buyback_ratio_fy: fundamentals.share_buyback_ratio_fy,
+        total_shares_outstanding: fundamentals.total_shares_outstanding,
+        total_shares_outstanding_current: fundamentals.total_shares_outstanding_current,
+        diluted_shares_outstanding_fq: fundamentals.diluted_shares_outstanding_fq,
+        float_shares_outstanding: fundamentals.float_shares_outstanding,
+        shares_outstanding: fundamentals.shares_outstanding,
+        total_shares_outstanding_calculated: fundamentals.total_shares_outstanding_calculated,
     })
 }
 

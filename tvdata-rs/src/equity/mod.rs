@@ -9,14 +9,16 @@ use futures_util::stream::{self, StreamExt as FuturesStreamExt, TryStreamExt};
 
 use self::columns::{
     analyst_columns, analyst_forecast_columns, analyst_fx_rate_columns,
-    analyst_price_target_columns, analyst_recommendation_columns, earnings_calendar_columns,
-    equity_identity_columns, equity_quote_columns, equity_technical_columns, fundamentals_columns,
-    overview_columns,
+    analyst_price_target_columns, analyst_recommendation_columns, credit_rating_columns,
+    debt_detail_columns, earnings_calendar_columns, equity_identity_columns, equity_quote_columns,
+    equity_technical_columns, financial_statements_detail_columns, fundamentals_columns,
+    overview_columns, valuation_metrics_columns,
 };
 use self::decode::{
     decode_analyst, decode_analyst_forecasts, decode_analyst_fx_rates,
-    decode_analyst_price_targets, decode_analyst_recommendations, decode_earnings_calendar,
-    decode_fundamentals, decode_overview,
+    decode_analyst_price_targets, decode_analyst_recommendations, decode_credit_rating_snapshot,
+    decode_debt_detail, decode_earnings_calendar, decode_financial_statements_detail,
+    decode_fundamentals, decode_overview, decode_valuation_metrics,
 };
 use self::history::{
     decode_estimate_history, decode_point_in_time_fundamentals, estimate_history_fields,
@@ -39,7 +41,8 @@ pub use history::{
 };
 pub use types::{
     AnalystForecasts, AnalystFxRates, AnalystPriceTargets, AnalystRecommendations, AnalystSummary,
-    EarningsCalendar, EquityOverview, FundamentalsSnapshot,
+    CreditRatingHistoryPoint, CreditRatingSnapshot, DebtDetail, EarningsCalendar, EquityOverview,
+    FinancialStatementsDetail, FundamentalsSnapshot, ValuationMetrics,
 };
 
 const HISTORY_BATCH_CONCURRENCY: usize = 4;
@@ -387,6 +390,41 @@ impl<'a> EquityClient<'a> {
             .iter()
             .map(|row| decode_overview(&decoder, row))
             .collect::<Vec<_>>())
+    }
+
+    /// Fetches detailed financial statements for a single equity symbol.
+    pub async fn financial_statements_detail(
+        &self,
+        symbol: impl Into<Ticker>,
+    ) -> Result<FinancialStatementsDetail> {
+        let columns = financial_statements_detail_columns();
+        let decoder = RowDecoder::new(&columns);
+        let row = self.loader().fetch_one(symbol, columns).await?;
+        Ok(decode_financial_statements_detail(&decoder, &row))
+    }
+
+    /// Fetches detailed debt structure and coverage metrics for a single equity symbol.
+    pub async fn debt_detail(&self, symbol: impl Into<Ticker>) -> Result<DebtDetail> {
+        let columns = debt_detail_columns();
+        let decoder = RowDecoder::new(&columns);
+        let row = self.loader().fetch_one(symbol, columns).await?;
+        Ok(decode_debt_detail(&decoder, &row))
+    }
+
+    /// Fetches credit ratings from Fitch, S&P, and Moody's for a single equity symbol.
+    pub async fn credit_ratings(&self, symbol: impl Into<Ticker>) -> Result<CreditRatingSnapshot> {
+        let columns = credit_rating_columns();
+        let decoder = RowDecoder::new(&columns);
+        let row = self.loader().fetch_one(symbol, columns).await?;
+        Ok(decode_credit_rating_snapshot(&decoder, &row))
+    }
+
+    /// Fetches extended valuation metrics for a single equity symbol.
+    pub async fn valuation_metrics(&self, symbol: impl Into<Ticker>) -> Result<ValuationMetrics> {
+        let columns = valuation_metrics_columns();
+        let decoder = RowDecoder::new(&columns);
+        let row = self.loader().fetch_one(symbol, columns).await?;
+        Ok(decode_valuation_metrics(&decoder, &row))
     }
 
     /// Fetches the strongest equity movers in a market by percentage change.

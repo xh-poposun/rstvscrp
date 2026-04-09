@@ -86,6 +86,15 @@ pub struct GetFundamentalsResponse {
     pub gross_profit: Option<f64>,
     pub operating_income: Option<f64>,
     pub net_income: Option<f64>,
+    pub buyback_yield: Option<f64>,
+    pub share_buyback_ratio_fq: Option<f64>,
+    pub share_buyback_ratio_fy: Option<f64>,
+    pub total_shares_outstanding: Option<f64>,
+    pub total_shares_outstanding_current: Option<f64>,
+    pub diluted_shares_outstanding_fq: Option<f64>,
+    pub float_shares_outstanding: Option<f64>,
+    pub shares_outstanding: Option<f64>,
+    pub total_shares_outstanding_calculated: Option<f64>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GetFinancialStatementsParams {

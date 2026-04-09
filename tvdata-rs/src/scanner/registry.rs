@@ -95,14 +95,16 @@ impl FieldRegistry {
 
     pub fn search(&self, screener: ScreenerKind, query: &str) -> Vec<&FieldDescriptor> {
         let query = query.to_ascii_lowercase();
-        self.fields(screener)
-            .iter()
-            .filter(|field| {
-                field.name.to_ascii_lowercase().contains(&query)
-                    || field.label.to_ascii_lowercase().contains(&query)
-                    || field.field_name.to_ascii_lowercase().contains(&query)
-            })
-            .collect()
+        let mut result = Vec::new();
+        for field in self.fields(screener).iter() {
+            if field.name.to_ascii_lowercase().contains(&query)
+                || field.label.to_ascii_lowercase().contains(&query)
+                || field.field_name.to_ascii_lowercase().contains(&query)
+            {
+                result.push(field);
+            }
+        }
+        result
     }
 
     pub fn find_by_api_name(

@@ -1,6 +1,7 @@
 pub mod analyst;
 pub mod calendar;
 pub mod core;
+pub mod financials;
 pub mod fundamentals;
 pub mod performance;
 pub mod price;

@@ -141,11 +141,14 @@ impl<'a> SnapshotLoader<'a> {
 
 fn dedupe_tickers(requested: &[Ticker]) -> Vec<Ticker> {
     let mut seen = HashSet::new();
-    requested
-        .iter()
-        .filter(|ticker| seen.insert(ticker.as_str().to_owned()))
-        .cloned()
-        .collect::<Vec<_>>()
+    let mut result = Vec::new();
+    for ticker in requested.iter() {
+        let s = ticker.as_str().to_owned();
+        if seen.insert(s) {
+            result.push(ticker.clone());
+        }
+    }
+    result
 }
 
 impl<'a> SnapshotLoader<'a> {
@@ -159,10 +162,13 @@ impl<'a> SnapshotLoader<'a> {
 
         let client = self.client;
         let base_query = self.base_query.clone();
+        let chunks: Vec<Vec<Ticker>> = tickers
+            .chunks(plan.chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
         let mut chunked_rows = stream::iter(
-            tickers
-                .chunks(plan.chunk_size)
-                .map(|chunk| chunk.to_vec())
+            chunks
+                .into_iter()
                 .enumerate()
                 .map(|(index, chunk)| {
                     let columns = columns.clone();
@@ -207,10 +213,13 @@ impl<'a> SnapshotLoader<'a> {
 
         let client = self.client;
         let base_query = self.base_query.clone();
+        let chunks: Vec<Vec<Ticker>> = tickers
+            .chunks(plan.chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
         let mut outcomes = stream::iter(
-            tickers
-                .chunks(plan.chunk_size)
-                .map(|chunk| chunk.to_vec())
+            chunks
+                .into_iter()
                 .enumerate()
                 .map(|(index, chunk)| {
                     let columns = columns.clone();
