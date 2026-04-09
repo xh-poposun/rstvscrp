@@ -1,0 +1,8 @@
+{
+  "name": "tv-private-equity",
+  "version": "0.1.0",
+  "description": "Private equity deal sourcing and workflow tools using TradingView data: company discovery, public target screening, and IC memo preparation",
+  "author": {
+    "name": "Anthropic FSI"
+  }
+}
