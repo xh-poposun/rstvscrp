@@ -1,5 +1,6 @@
 use crate::client::{TradingViewMcpClient, ClientError};
 use crate::tools::{GetQuoteParams, GetQuoteResponse, SearchSymbolsParams, SearchSymbolsResponse};
+use chrono::Utc;
 
 /// Parameters for batch quote requests
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
@@ -23,10 +24,16 @@ pub async fn handle_get_quote(
 
     Ok(GetQuoteResponse {
         symbol: quote.symbol,
-        price: Some(quote.price),
-        change: Some(quote.change),
-        change_percent: Some(quote.change_percent),
-        volume: Some(quote.volume as f64),
+        price: quote.price,
+        change: quote.change,
+        change_percent: quote.change_percent,
+        volume: quote.volume,
+        high: quote.high,
+        low: quote.low,
+        open: quote.open,
+        previous_close: quote.previous_close,
+        currency: "USD".to_string(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
 
@@ -56,10 +63,16 @@ pub async fn handle_get_batch_quotes(
         .into_iter()
         .map(|quote| GetQuoteResponse {
             symbol: quote.symbol,
-            price: Some(quote.price),
-            change: Some(quote.change),
-            change_percent: Some(quote.change_percent),
-            volume: Some(quote.volume as f64),
+            price: quote.price,
+            change: quote.change,
+            change_percent: quote.change_percent,
+            volume: quote.volume,
+            high: quote.high,
+            low: quote.low,
+            open: quote.open,
+            previous_close: quote.previous_close,
+            currency: "USD".to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
 

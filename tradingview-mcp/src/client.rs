@@ -10,7 +10,7 @@ use tvdata_rs::{
     AuthConfig, TradingViewClient, TradingViewClientConfig,
     calendar::{CalendarWindowRequest, DividendCalendarRequest, DividendDateKind},
     history::{HistoryRequest, Interval},
-    scanner::{ScanQuery, Ticker, fields::{price, fundamentals}},
+    scanner::{ScanQuery, Ticker, fields::{core, price}},
     search::SearchRequest,
 };
 
@@ -137,7 +137,7 @@ impl ClientConfig {
 }
 
 /// Rate limiter for controlling request rate
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RateLimiter {
     /// Minimum interval between requests
     min_interval: Duration,
@@ -229,6 +229,15 @@ pub struct SymbolSearchResult {
     pub asset_class: String,
 }
 
+/// Scanned stock result from the scanner API
+#[derive(Debug, Clone)]
+pub struct ScannedStock {
+    pub symbol: String,
+    pub name: Option<String>,
+    pub exchange: Option<String>,
+    pub price: Option<f64>,
+}
+
 /// Earnings calendar entry
 #[derive(Debug, Clone)]
 pub struct EarningsCalendarEntry {
@@ -246,7 +255,7 @@ pub struct DividendCalendarEntry {
 }
 
 /// TradingView API client wrapper with rate limiting and retry logic
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TradingViewMcpClient {
     inner: Arc<TradingViewClient>,
     rate_limiter: RateLimiter,
@@ -350,33 +359,41 @@ impl TradingViewMcpClient {
 
     /// Get fundamentals for a single symbol
     pub async fn get_fundamentals(&self, symbol: &str) -> Result<Fundamentals, ClientError> {
-        self.execute_with_retry(|| async {
-            let _permit = self.rate_limiter.acquire().await;
+        let symbol = symbol.to_string();
+        let inner = Arc::clone(&self.inner);
+        let rate_limiter = self.rate_limiter.clone();
+        self.execute_with_retry(move || {
+            let symbol = symbol.clone();
+            let inner = Arc::clone(&inner);
+            let rate_limiter = rate_limiter.clone();
+            async move {
+                let _permit = rate_limiter.acquire().await;
 
-            let equity = self.inner.equity();
-            let snapshot = equity
-                .fundamentals(symbol.to_string())
-                .await
-                .map_err(|e| ClientError::Api(format!("Failed to fetch fundamentals: {}", e)))?;
+                let equity = inner.equity();
+                let snapshot = equity
+                    .fundamentals(symbol.clone())
+                    .await
+                    .map_err(|e| ClientError::Api(format!("Failed to fetch fundamentals: {}", e)))?;
 
-        Ok(Fundamentals {
-            symbol: symbol.to_string(),
-            market_cap: snapshot.market_cap,
-            pe_ratio: snapshot.price_earnings_ttm,
-            eps: snapshot.eps_ttm,
-            dividend_yield: snapshot.dividend_yield_recent,
-            beta: None,
-            price_to_book: snapshot.price_to_book_fq,
-            debt_to_equity: snapshot.debt_to_equity_mrq,
-            current_ratio: snapshot.current_ratio_mrq,
-            quick_ratio: None,
-            roe: snapshot.return_on_equity_ttm,
-            roa: snapshot.return_on_assets_ttm,
-            revenue: snapshot.total_revenue_ttm,
-            gross_profit: None,
-            operating_income: None,
-            net_income: snapshot.net_income_ttm,
-        })
+                Ok(Fundamentals {
+                    symbol: symbol.clone(),
+                    market_cap: snapshot.market_cap,
+                    pe_ratio: snapshot.price_earnings_ttm,
+                    eps: snapshot.eps_ttm,
+                    dividend_yield: snapshot.dividend_yield_recent,
+                    beta: None,
+                    price_to_book: snapshot.price_to_book_fq,
+                    debt_to_equity: snapshot.debt_to_equity_mrq,
+                    current_ratio: snapshot.current_ratio_mrq,
+                    quick_ratio: None,
+                    roe: snapshot.return_on_equity_ttm,
+                    roa: snapshot.return_on_assets_ttm,
+                    revenue: snapshot.total_revenue_ttm,
+                    gross_profit: None,
+                    operating_income: None,
+                    net_income: snapshot.net_income_ttm,
+                })
+            }
         })
         .await
     }
@@ -433,6 +450,64 @@ pub async fn search_equities(&self, query: &str) -> Result<Vec<SymbolSearchResul
             .collect();
 
             Ok(results)
+        })
+        .await
+    }
+
+    pub async fn scan_stocks(
+        &self,
+        filters: Option<serde_json::Value>,
+        limit: u32,
+    ) -> Result<Vec<ScannedStock>, ClientError> {
+        let market = filters
+            .as_ref()
+            .and_then(|f| f.get("market"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("america")
+            .to_string();
+
+        self.execute_with_retry(move || {
+            let market = market.clone();
+            async move {
+                let _permit = self.rate_limiter.acquire().await;
+
+                let columns = vec![
+                    core::NAME,
+                    core::EXCHANGE,
+                    price::CLOSE,
+                ];
+
+                let query = ScanQuery::new()
+                    .market(market)
+                    .select(columns)
+                    .page(0, limit as usize)
+                    .map_err(|e| ClientError::Api(format!("Invalid page parameters: {}", e)))?;
+
+                let response = self
+                    .inner
+                    .scan(&query)
+                    .await
+                    .map_err(|e| ClientError::Api(format!("Failed to scan stocks: {}", e)))?;
+
+                let results = response
+                    .rows
+                    .into_iter()
+                    .map(|row| {
+                        let name = row.values.get(0).and_then(|v| v.as_str()).map(String::from);
+                        let exchange = row.values.get(1).and_then(|v| v.as_str()).map(String::from);
+                        let price = row.values.get(2).and_then(|v| v.as_f64());
+
+                        ScannedStock {
+                            symbol: row.symbol,
+                            name,
+                            exchange,
+                            price,
+                        }
+                    })
+                    .collect();
+
+                Ok(results)
+            }
         })
         .await
     }
@@ -517,6 +592,46 @@ pub async fn search_equities(&self, query: &str) -> Result<Vec<SymbolSearchResul
                 .map_err(|e| ClientError::Api(format!("Failed to fetch credit ratings: {}", e)))?;
 
             Ok(ratings)
+        })
+        .await
+    }
+
+    /// Get company profile overview for a symbol
+    pub async fn get_company_profile(
+        &self,
+        symbol: &str,
+    ) -> Result<tvdata_rs::equity::EquityOverview, ClientError> {
+        let symbol = symbol.to_string();
+        self.execute_with_retry(|| async {
+            let _permit = self.rate_limiter.acquire().await;
+
+            let equity = self.inner.equity();
+            let profile = equity
+                .overview(symbol.clone())
+                .await
+                .map_err(|e| ClientError::Api(format!("Failed to fetch company profile: {}", e)))?;
+
+            Ok(profile)
+        })
+        .await
+    }
+
+    /// Get debt maturity/summary for a symbol
+    pub async fn get_debt_maturity(
+        &self,
+        symbol: &str,
+    ) -> Result<tvdata_rs::equity::DebtDetail, ClientError> {
+        let symbol = symbol.to_string();
+        self.execute_with_retry(|| async {
+            let _permit = self.rate_limiter.acquire().await;
+
+            let equity = self.inner.equity();
+            let debt = equity
+                .debt_detail(symbol.clone())
+                .await
+                .map_err(|e| ClientError::Api(format!("Failed to fetch debt maturity: {}", e)))?;
+
+            Ok(debt)
         })
         .await
     }

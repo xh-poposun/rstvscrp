@@ -3,13 +3,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub mod client;
 pub mod handlers;
 pub mod sec_edgar;
 pub mod tools;
 
-pub const MCP_VERSION: &str = "2024-11-05";
+use client::TradingViewMcpClient;
+
+pub const MCP_VERSION: &str = "2025-03-26";
 
 pub mod error_codes {
     pub const PARSE_ERROR: i32 = -32700;
@@ -109,14 +112,16 @@ impl ToolContent {
 }
 
 pub type ToolHandlerFn = Box<
-    dyn Fn(Option<Value>) -> Pin<Box<dyn Future<Output = Result<ToolCallResult, JsonRpcError>> + Send>>
+    dyn Fn(Arc<TradingViewMcpClient>, Option<Value>) -> Pin<Box<dyn Future<Output = Result<ToolCallResult, JsonRpcError>> + Send>>
         + Send
-        + Sync,
+        + Sync
+        + 'static,
 >;
 
 pub struct McpServer {
     tool_registry: Vec<tools::Tool>,
     handlers: HashMap<String, ToolHandlerFn>,
+    client: Option<Arc<TradingViewMcpClient>>,
 }
 
 impl McpServer {
@@ -127,16 +132,30 @@ impl McpServer {
         Self {
             tool_registry,
             handlers,
+            client: None,
         }
     }
 
-    pub fn register_handler<F, Fut>(&mut self, name: impl Into<String>, handler: F)
+    pub fn with_client(client: Arc<TradingViewMcpClient>) -> Self {
+        let tool_registry = tools::registry();
+        let handlers: HashMap<String, ToolHandlerFn> = HashMap::new();
+
+        Self {
+            tool_registry,
+            handlers,
+            client: Some(client),
+        }
+    }
+
+    pub fn set_client(&mut self, client: Arc<TradingViewMcpClient>) {
+        self.client = Some(client);
+    }
+
+    pub fn register_handler<F>(&mut self, name: impl Into<String>, handler: F)
     where
-        F: Fn(Option<Value>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<ToolCallResult, JsonRpcError>> + Send + 'static,
+        F: Fn(Arc<TradingViewMcpClient>, Option<Value>) -> Pin<Box<dyn Future<Output = Result<ToolCallResult, JsonRpcError>> + Send>> + Send + Sync + 'static,
     {
-        let boxed_handler: ToolHandlerFn =
-            Box::new(move |args| Box::pin(handler(args)));
+        let boxed_handler: ToolHandlerFn = Box::new(handler);
         self.handlers.insert(name.into(), boxed_handler);
     }
 
@@ -153,12 +172,22 @@ impl McpServer {
             };
         }
 
-        let result = match request.method.as_str() {
-            "initialize" => self.handle_initialize(request.params).await,
-            "tools/list" => self.handle_tools_list().await,
-            "tools/call" => self.handle_tools_call(request.params).await,
-            _ => Err(JsonRpcError::method_not_found(&request.method)),
+let result = match request.method.as_str() {
+    "initialize" => self.handle_initialize(request.params).await,
+    "notifications/initialized" => {
+        // MCP spec: notifications have no id and should not return a response
+        // Return empty JsonRpcResponse with id=None to indicate no response needed
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            result: None,
+            error: None,
         };
+    }
+    "tools/list" => self.handle_tools_list().await,
+    "tools/call" => self.handle_tools_call(request.params).await,
+    _ => Err(JsonRpcError::method_not_found(&request.method)),
+};
 
         match result {
             Ok(value) => JsonRpcResponse {
@@ -176,21 +205,28 @@ impl McpServer {
         }
     }
 
-    async fn handle_initialize(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
-        let result = serde_json::json!({
-            "protocolVersion": MCP_VERSION,
-            "capabilities": {
-                "tools": {
-                    "listChanged": true
-                }
-            },
-            "serverInfo": {
-                "name": "tradingview-mcp",
-                "version": env!("CARGO_PKG_VERSION")
+async fn handle_initialize(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
+    // Extract protocolVersion from request params, fallback to MCP_VERSION
+    let protocol_version = params
+        .as_ref()
+        .and_then(|p| p.get("protocolVersion"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(MCP_VERSION);
+    
+    let result = serde_json::json!({
+        "protocolVersion": protocol_version,
+        "capabilities": {
+            "tools": {
+                "listChanged": true
             }
-        });
-        Ok(result)
-    }
+        },
+        "serverInfo": {
+            "name": "tradingview-mcp",
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    });
+    Ok(result)
+}
 
     async fn handle_tools_list(&self) -> Result<Value, JsonRpcError> {
         let tools: Vec<Value> = self
@@ -230,7 +266,10 @@ impl McpServer {
         }
 
         if let Some(handler) = self.handlers.get(&tool_params.name) {
-            let result = handler(tool_params.arguments).await?;
+            let client = self.client.clone().ok_or_else(|| {
+                JsonRpcError::internal_error("MCP server client not initialized")
+            })?;
+            let result = handler(client, tool_params.arguments).await?;
             Ok(serde_json::to_value(result).map_err(|e| {
                 JsonRpcError::internal_error(format!("Failed to serialize result: {}", e))
             })?)
@@ -364,5 +403,65 @@ mod tests {
         assert!(response.error.is_some());
         let error = response.error.unwrap();
         assert_eq!(error.code, error_codes::INVALID_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_notifications_initialized() {
+        let server = McpServer::new();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None, // Notifications have no id
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+
+        let response = server.handle_request(request).await;
+        // Notification should return empty response with no error
+        assert!(response.error.is_none());
+        assert!(response.result.is_none());
+        assert_eq!(response.id, None);
+    }
+
+    #[tokio::test]
+    async fn test_initialize_then_notification_then_tools_list() {
+        let server = McpServer::new();
+
+        // Step 1: Initialize
+        let init_request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1.into()),
+            method: "initialize".to_string(),
+            params: Some(serde_json::json!({
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"}
+            })),
+        };
+        let init_response = server.handle_request(init_request).await;
+        assert!(init_response.error.is_none());
+        assert!(init_response.result.is_some());
+
+        // Step 2: Notification
+        let notif_request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        let notif_response = server.handle_request(notif_request).await;
+        assert!(notif_response.error.is_none());
+
+        // Step 3: Tools list still works
+        let tools_request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(2.into()),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+        let tools_response = server.handle_request(tools_request).await;
+        assert!(tools_response.error.is_none());
+        let result = tools_response.result.unwrap();
+        let tools = result["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 15);
     }
 }
