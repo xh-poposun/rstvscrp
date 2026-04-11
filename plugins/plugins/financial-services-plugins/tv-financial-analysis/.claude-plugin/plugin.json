@@ -1,0 +1,8 @@
+{
+  "name": "tv-financial-analysis",
+  "version": "0.1.0",
+  "description": "Core financial modeling using TradingView data: DCF, comps, LBO, 3-statement models",
+  "author": {
+    "name": "Anthropic FSI"
+  }
+}

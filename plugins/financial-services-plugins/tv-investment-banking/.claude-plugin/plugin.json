@@ -1,0 +1,11 @@
+{
+  "name": "tv-investment-banking",
+  "version": "0.1.0",
+  "description": "Investment banking workflows with TradingView MCP integration: pitch decks, CIMs, teasers, and M&A materials using real-time market data",
+  "author": {
+    "name": "Anthropic"
+  },
+  "dependencies": [
+    "tv-financial-analysis"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "tradingview-finance",
+  "version": "0.1.0",
+  "description": "TradingView data integration for financial analysis",
+  "author": {
+    "name": "Anthropic FSI"
+  }
+}

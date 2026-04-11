@@ -1,0 +1,6 @@
+.sisyphus/
+opencode.log
+home/
+node_modules/
+.DS_Store
+*.log
