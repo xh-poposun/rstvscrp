@@ -1,0 +1,17 @@
+{
+  "plugins": [
+    {
+      "id": "/tradingview/finance",
+      "name": "tradingview-finance",
+      "version": "0.1.0",
+      "description": "TradingView financial data integration for DCF, Comps, and LBO analysis",
+      "path": "tradingview-finance",
+      "entry": {
+        "pluginJson": ".claude-plugin/plugin.json",
+        "mcpJson": ".mcp.json"
+      },
+      "commands": ["/quote", "/fundamentals", "/screen"],
+      "enabled": true
+    }
+  ]
+}

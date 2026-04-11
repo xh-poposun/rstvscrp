@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tradingview-mcp": {
+      "command": "tradingview-mcp",
+      "args": [],
+      "env": {
+        "TVDATA_USERNAME": "${TVDATA_USERNAME}",
+        "TVDATA_PASSWORD": "${TVDATA_PASSWORD}"
+      }
+    }
+  }
+}
